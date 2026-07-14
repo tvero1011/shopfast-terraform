@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (git-ignored) and edit.
+github_repo = "YOUR-GITHUB-USERNAME/YOUR-REPO-NAME"
+
+# Local only: your AWS CLI profile. Omit in CI.
+# aws_profile = "tf-dev"
+
+# Set to false if this AWS account already has the GitHub OIDC provider.
+# create_github_oidc_provider = true
