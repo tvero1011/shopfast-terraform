@@ -1,69 +1,175 @@
-# ShopFast: Enterprise-Grade Cloud Native Infrastructure
+# ShopFast Infrastructure on AWS with Terraform
 
-This repository contains the **Infrastructure as Code (IaC)** for ShopFast, a high-performance 3-tier API environment. The project demonstrates a production-standard deployment using AWS Fargate, managed databases, and a fully automated CI/CD lifecycle.
-
-
-
-## 🏗️ Architecture Design
-The architecture follows the principle of **Defense in Depth**, ensuring that application logic and data remain isolated from the public internet.
-
-* **Public Tier:** Application Load Balancer (ALB) managing ingress traffic.
-* **Application Tier:** ECS Fargate tasks running in private subnets, scaling horizontally.
-* **Data Tier:** Amazon RDS (Managed Database) isolated in a dedicated private subnet group.
-* **Networking:** Custom VPC with isolated routing, Security Group chaining, and Interface Endpoints for secure AWS service communication.
-
-## 🛠️ Project Milestones (The Roadmap)
-
-### Phase 1: Containerization & Local Artifacts
-* Dockerized the Node.js API with a multi-stage build to minimize image size.
-* Verified local runtime consistency before cloud migration.
-
-### Phase 2: Modular Networking & Registry
-* Engineered a modular VPC with distinct Public and Private subnets.
-* Deployed Amazon ECR (Elastic Container Registry) via Terraform for secure image hosting.
-
-### Phase 3: Identity (IAM) & Task Orchestration
-* Implemented **Least-Privilege** IAM Execution Roles for container logging and image pulling.
-* Defined ECS Task Definitions including CPU/Memory limits and environment variable mapping.
-
-### Phase 4: Compute Engine & CI/CD Automation
-* Deployed the ECS Fargate Service into Private Subnets to eliminate direct internet exposure.
-* Integrated **GitHub Actions** to automate the build-tag-push-deploy lifecycle.
-
-### Phase 5: Managed Data Tier & Observability
-* Deployed a managed RDS instance via Terraform.
-* Configured **CloudWatch** for centralized logging and performance monitoring.
-* Standardized the environment for enterprise-level scalability.
-
-## 🛡️ Core Skills Demonstrated
-
-| Skill | Implementation |
-| :--- | :--- |
-| **Infrastructure as Code** | 100% Terraform (Modular & Reusable Design) |
-| **Compute** | AWS ECS Fargate (Serverless Containers) |
-| **Networking** | VPC, Private Subnets, Interface Endpoints |
-| **Security** | IAM Role Chaining, Secrets Management, Security Group Hardening |
-| **DevOps** | GitHub Actions CI/CD Pipeline |
-| **Observability** | Amazon CloudWatch Logs & Metrics |
-
-## 🚀 Deployment Guide
-
-1.  **Initialize & Registry Setup:**
-    ```bash
-    terraform init
-    terraform apply -target=module.ecr
-    ```
-2.  **Push Docker Image:**
-    Login to ECR, tag your local image, and push it to the repository URL provided in the Terraform outputs.
-3.  **Deploy Infrastructure:**
-    ```bash
-    terraform apply
-    ```
-
-## 🧠 Key Architectural Decisions
-* **Security Groups:** I implemented "Security Group Chaining" where the Database only accepts traffic from the ECS Task SG, and the ECS Task SG only accepts traffic from the ALB SG. 
-* **Private Isolation:** By setting `assign_public_ip = false`, I ensured the application is inaccessible except through the Load Balancer.
-* **Modularization:** Every component (VPC, RDS, ECS) is a standalone module, allowing for easy updates and multi-environment (Dev/Prod) replication.
+> Production-style AWS infrastructure built with Terraform using Amazon ECS Fargate, Application Load Balancer, VPC networking, IAM, and CloudWatch.
 
 ---
-*Developed as a demonstration of modern Cloud Engineering and DevOps practices.*
+
+## Project Overview
+
+ShopFast is a cloud infrastructure project demonstrating how to provision and manage a scalable containerized web application on AWS using Infrastructure as Code (IaC).
+
+The project uses Terraform to automate the deployment of networking, security, compute, and load balancing resources following AWS best practices.
+
+This project was built to strengthen practical skills in AWS architecture, Infrastructure as Code, and cloud deployment automation.
+
+---
+
+# Architecture
+
+```
+                    Internet
+                        │
+                        ▼
+          Application Load Balancer
+                        │
+                        ▼
+                 ECS Fargate Service
+                        │
+                        ▼
+                  Docker Container
+                        │
+                        ▼
+                 CloudWatch Logs
+
+──────────────────────────────────────
+
+Public Subnets
+    │
+    └── ALB
+
+Private Subnets
+    └── ECS Tasks
+
+VPC
+```
+
+---
+
+# AWS Services Used
+
+- Amazon ECS (Fargate)
+- Application Load Balancer (ALB)
+- Amazon VPC
+- Public & Private Subnets
+- Internet Gateway
+- Route Tables
+- Security Groups
+- IAM Roles
+- Amazon CloudWatch
+- Amazon ECR
+- Terraform
+
+---
+
+# Features
+
+- Infrastructure provisioned entirely with Terraform
+- Containerized application deployment using ECS Fargate
+- Secure VPC design with public and private subnets
+- Application Load Balancer for traffic distribution
+- IAM roles following least-privilege principles
+- CloudWatch logging for monitoring
+- Modular Terraform configuration
+- Infrastructure version-controlled with Git
+
+---
+
+# Repository Structure
+
+```
+shopfast-terraform
+│
+├── app/
+│   ├── Dockerfile
+│   └── application source
+│
+├── terraform/
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── provider.tf
+│   └── modules/
+│
+├── diagrams/
+│
+└── README.md
+```
+
+---
+
+# Technologies
+
+- Terraform
+- AWS
+- Docker
+- Amazon ECS
+- Amazon ECR
+- Amazon VPC
+- IAM
+- CloudWatch
+- Git
+- GitHub
+
+---
+
+# Skills Demonstrated
+
+- Infrastructure as Code (IaC)
+- AWS Cloud Architecture
+- Terraform
+- Networking
+- IAM
+- Container Deployment
+- Cloud Security Fundamentals
+- Version Control
+- Cloud Automation
+
+---
+
+# Screenshots
+
+Add screenshots inside the `diagrams/` folder.
+
+Recommended images:
+
+- AWS Architecture Diagram
+- ECS Service
+- Application Load Balancer
+- CloudWatch Logs
+- Terraform Apply Output
+- VPC Resources
+
+---
+
+# Lessons Learned
+
+This project provided hands-on experience designing AWS infrastructure with Terraform and deploying containerized workloads using Amazon ECS Fargate. It reinforced best practices for networking, IAM, Infrastructure as Code, and cloud resource organization while highlighting the value of automation and repeatable deployments.
+
+---
+
+# Future Improvements
+
+- GitHub Actions CI/CD pipeline
+- HTTPS using AWS Certificate Manager
+- Route 53 custom domain
+- Auto Scaling
+- Amazon RDS integration
+- AWS WAF
+- Secrets Manager
+- Monitoring dashboards
+
+---
+
+# Author
+
+**Rovert Pangan**
+
+AWS Certified Solutions Architect – Associate
+
+Cloud Engineer | Automation Engineer
+
+---
+
+## License
+
+This project is licensed under the MIT License.
