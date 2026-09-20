@@ -1,0 +1,28 @@
+name: Terraform checks
+
+on:
+  pull_request:
+    paths: ["**.tf"]
+  push:
+    branches: [main]
+    paths: ["**.tf"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialise (no backend, no credentials needed)
+        run: terraform init -backend=false
+
+      - name: Validate configuration
+        run: terraform validate
