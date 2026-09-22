@@ -12,13 +12,15 @@ terraform {
     }
   }
 
-  # Recommended for anything beyond a lab: remote, encrypted, locked state.
-  # The DB password lives in state, so local state files must never be committed.
-  # backend "s3" {
-  #   bucket         = "YOUR-TFSTATE-BUCKET"
-  #   key            = "shopfast/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "YOUR-TFSTATE-LOCK-TABLE"
-  #   encrypt        = true
-  # }
+  # Remote, encrypted, locked state. The DB password lives in state, so local
+  # state files must never be committed. Run `bootstrap/` once first, then
+  # replace the two values below with its outputs, then `terraform init -migrate-state`.
+  # Backend blocks can't reference variables, so these are literal strings.
+  backend "s3" {
+    bucket         = "shopfast-tfstate-REPLACE-ME" # bootstrap output: state_bucket_name
+    key            = "shopfast/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "shopfast-tfstate-lock"       # bootstrap output: lock_table_name
+    encrypt        = true
+  }
 }

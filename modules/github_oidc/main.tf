@@ -102,3 +102,49 @@ resource "aws_iam_role_policy" "deploy" {
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.deploy.json
 }
+
+# ---------------------------------------------------------
+# Second, read-only role: lets pull_request workflows run `terraform plan`
+# so reviewers see the infra diff before merging.
+#
+# Separate from the deploy role above for two reasons:
+#  1. A PR run's OIDC "sub" claim is "...:pull_request", not
+#     "...:ref:refs/heads/main", so it can't assume the deploy role anyway.
+#  2. `plan` needs broad READ access across every resource type Terraform
+#     manages (vpc, rds, alb, ecs, iam...). The deploy role deliberately
+#     doesn't have that - keeping them separate means a compromised PR
+#     workflow still can't change anything, only read.
+# ---------------------------------------------------------
+data "aws_iam_policy_document" "assume_plan" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repo}:pull_request"]
+    }
+  }
+}
+
+resource "aws_iam_role" "terraform_plan" {
+  name               = "${var.project_name}-terraform-plan"
+  assume_role_policy = data.aws_iam_policy_document.assume_plan.json
+}
+
+# Read-only by design: a plan should never be able to change anything
+resource "aws_iam_role_policy_attachment" "terraform_plan_readonly" {
+  role       = aws_iam_role.terraform_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}

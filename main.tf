@@ -75,3 +75,17 @@ module "github_oidc" {
   ecs_service_arn        = module.ecs.service_arn
   ecs_execution_role_arn = module.ecs.execution_role_arn
 }
+
+# ---------------------------------------------------------
+# 7. Alarms: ECS CPU, ALB 5xx/unhealthy hosts, RDS CPU/storage -> one SNS topic
+# ---------------------------------------------------------
+module "cloudwatch" {
+  source                  = "./modules/cloudwatch"
+  project_name            = var.project_name
+  alert_email             = var.alert_email
+  ecs_cluster_name        = module.ecs.cluster_name
+  ecs_service_name        = module.ecs.service_name
+  alb_arn_suffix          = module.alb.alb_arn_suffix
+  target_group_arn_suffix = module.alb.target_group_arn_suffix
+  db_instance_id          = module.rds.db_instance_id
+}

@@ -34,6 +34,11 @@ output "github_actions_role_arn" {
   value       = module.github_oidc.role_arn
 }
 
+output "terraform_plan_role_arn" {
+  description = "Read-only IAM role for PR plan workflows (GitHub variable TF_PLAN_ROLE_ARN)"
+  value       = module.github_oidc.terraform_plan_role_arn
+}
+
 # ---------------------------------------------------------
 # 3. Backend and database
 # ---------------------------------------------------------
@@ -53,4 +58,12 @@ output "db_password_secret_arn" {
 output "vpc_id" {
   description = "The VPC everything lives in"
   value       = module.vpc.vpc_id
+}
+
+# ---------------------------------------------------------
+# 5. Observability
+# ---------------------------------------------------------
+output "alerts_topic_arn" {
+  description = "SNS topic that CloudWatch alarms publish to (subscribe a phone/Slack/email here)"
+  value       = module.cloudwatch.sns_topic_arn
 }

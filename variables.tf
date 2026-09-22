@@ -47,3 +47,12 @@ variable "create_github_oidc_provider" {
   type        = bool
   default     = true
 }
+
+# ---------------------------------------------------------
+# 4. Observability
+# ---------------------------------------------------------
+variable "alert_email" {
+  description = "Email address for CloudWatch alarm notifications. Leave null to create the SNS topic without a subscription."
+  type        = string
+  default     = null
+}

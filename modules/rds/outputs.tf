@@ -17,3 +17,8 @@ output "db_username" {
   description = "Database username (passed to the app as DB_USER)"
   value       = var.db_username
 }
+
+output "db_instance_id" {
+  description = "RDS instance identifier, used as a CloudWatch alarm dimension"
+  value       = aws_db_instance.main.id
+}
