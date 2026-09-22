@@ -1,0 +1,56 @@
+name: Terraform checks
+
+on:
+  pull_request:
+    paths: ["**.tf"]
+  push:
+    branches: [main]
+    paths: ["**.tf"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialise (no backend, no credentials needed)
+        run: terraform init -backend=false
+
+      - name: Validate configuration
+        run: terraform validate
+
+  # Runs only on PRs, after validate passes. Uses a READ-ONLY role, so this
+  # job can never change infrastructure - it only shows reviewers the diff.
+  # Require this check (+ a review approval) in branch protection on `main`:
+  # that review is the manual-approval gate before anyone runs `terraform apply`.
+  plan:
+    needs: validate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Authenticate to AWS (OIDC, read-only)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Initialise (real backend)
+        run: terraform init
+
+      - name: Plan
+        run: terraform plan -no-color -input=false

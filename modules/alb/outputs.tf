@@ -13,3 +13,16 @@ output "alb_dns_name" {
   description = "The public URL of your application."
   value       = aws_lb.main.dns_name
 }
+
+# ---------------------------------------------------------
+# 3. For CloudWatch alarms (metric dimensions use the ARN suffix, not the full ARN)
+# ---------------------------------------------------------
+output "alb_arn_suffix" {
+  description = "ALB ARN suffix, used as a CloudWatch alarm dimension"
+  value       = aws_lb.main.arn_suffix
+}
+
+output "target_group_arn_suffix" {
+  description = "Target group ARN suffix, used as a CloudWatch alarm dimension"
+  value       = aws_lb_target_group.app.arn_suffix
+}
