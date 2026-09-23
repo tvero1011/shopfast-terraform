@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.10.0"
 
   required_providers {
     aws = {
@@ -14,13 +14,15 @@ terraform {
 
   # Remote, encrypted, locked state. The DB password lives in state, so local
   # state files must never be committed. Run `bootstrap/` once first, then
-  # replace the two values below with its outputs, then `terraform init -migrate-state`.
-  # Backend blocks can't reference variables, so these are literal strings.
+  # replace the value below with its output, then `terraform init -migrate-state`.
+  # Backend blocks can't reference variables, so this is a literal string.
+  # Locking is native S3 conditional-write locking (use_lockfile, Terraform
+  # >= 1.10) — no DynamoDB lock table needed.
   backend "s3" {
-    bucket         = "shopfast-tfstate-REPLACE-ME" # bootstrap output: state_bucket_name
-    key            = "shopfast/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "shopfast-tfstate-lock"       # bootstrap output: lock_table_name
-    encrypt        = true
+    bucket       = "shopfast-tfstate-REPLACE-ME" # bootstrap output: state_bucket_name
+    key          = "shopfast/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
   }
 }
