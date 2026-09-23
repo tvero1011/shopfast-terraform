@@ -1,6 +1,8 @@
 # ---------------------------------------------------------
-# One-time bootstrap: creates the S3 bucket + DynamoDB table that the
-# main ShopFast config uses as its remote state backend.
+# One-time bootstrap: creates the S3 bucket that the main ShopFast
+# config uses as its remote state backend. State locking and
+# encryption are handled natively by S3 (Terraform >= 1.10, via
+# use_lockfile), so no DynamoDB lock table is needed.
 #
 # Chicken-and-egg problem: Terraform can't store its own state in a
 # bucket that doesn't exist yet. So this is a small, separate config
@@ -11,12 +13,12 @@
 #   cd bootstrap
 #   terraform init
 #   terraform apply -var="state_bucket_name=shopfast-tfstate-<something-unique>"
-#   (copy the printed bucket + table names into ../versions.tf)
+#   (copy the printed bucket name into ../versions.tf)
 #   cd ..
 #   terraform init -migrate-state   # moves existing local state into S3
 # ---------------------------------------------------------
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.10.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -62,13 +64,3 @@ resource "aws_s3_bucket_public_access_block" "tfstate" {
   restrict_public_buckets = true
 }
 
-resource "aws_dynamodb_table" "tfstate_lock" {
-  name         = var.lock_table_name
-  billing_mode = "PAY_PER_REQUEST" # no capacity planning needed for a lock table
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-}

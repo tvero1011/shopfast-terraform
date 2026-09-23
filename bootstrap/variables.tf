@@ -14,9 +14,3 @@ variable "state_bucket_name" {
   type        = string
   description = "Globally-unique S3 bucket name for Terraform state (e.g. shopfast-tfstate-yourname)"
 }
-
-variable "lock_table_name" {
-  type        = string
-  description = "DynamoDB table used for state locking"
-  default     = "shopfast-tfstate-lock"
-}
