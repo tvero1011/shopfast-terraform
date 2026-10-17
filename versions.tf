@@ -19,7 +19,7 @@ terraform {
   # Locking is native S3 conditional-write locking (use_lockfile, Terraform
   # >= 1.10) — no DynamoDB lock table needed.
   backend "s3" {
-    bucket       = "shopfast-tfstate-REPLACE-ME" # bootstrap output: state_bucket_name
+    bucket       = "shopfast-tfstate-rovert-2026" # bootstrap output: state_bucket_name
     key          = "shopfast/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
