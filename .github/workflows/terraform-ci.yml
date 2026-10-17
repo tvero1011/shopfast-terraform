@@ -53,4 +53,6 @@ jobs:
         run: terraform init
 
       - name: Plan
+        env:
+          TF_VAR_github_repo: ${{ github.repository }}
         run: terraform plan -no-color -input=false
