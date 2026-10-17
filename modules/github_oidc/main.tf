@@ -148,3 +148,19 @@ resource "aws_iam_role_policy_attachment" "terraform_plan_readonly" {
   role       = aws_iam_role.terraform_plan.name
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
+
+# Native S3 state locking writes a small .tflock file next to the state.
+# Allow only that one key, so a plan can lock but never touch the state itself.
+resource "aws_iam_role_policy" "terraform_plan_state_lock" {
+  name = "${var.project_name}-plan-state-lock"
+  role = aws_iam_role.terraform_plan.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
+      Resource = "arn:aws:s3:::shopfast-tfstate-rovert-2026/shopfast/terraform.tfstate.tflock"
+    }]
+  })
+}
