@@ -2,19 +2,22 @@
 
 Infrastructure as Code for a containerized Node.js API on AWS. A public Application Load Balancer fronts ECS Fargate tasks running in private subnets, which talk to a private RDS PostgreSQL database. A GitHub Actions pipeline builds, pushes and deploys new versions using short-lived OIDC credentials.
 
+> **Status:** DevOps portfolio and learning project. Deployed, tested and destroyed on AWS (us-east-1) on 17 October 2026; see [Deployment proof](#deployment-proof) and [Known limitations](#known-limitations-deliberate-scope-for-a-lab) before any production use.
+
 ## Architecture
 
+```text
 Internet ──HTTP:80──▶ ALB (public subnets, 2 AZs)
-│ target group (type=ip, :3000, health check "/")
-▼
-ECS Fargate tasks (private subnets, 2 AZs, autoscaling 2-4)
-│ PostgreSQL :5432 (SSL)
-▼
-RDS PostgreSQL (private subnets, encrypted)
+                       │ target group (type=ip, :3000, health check "/")
+                       ▼
+                      ECS Fargate tasks (private subnets, 2 AZs, autoscaling 2-4)
+                       │ PostgreSQL :5432 (SSL)
+                       ▼
+                      RDS PostgreSQL (private subnets, encrypted)
+```
 
 Private subnets have no internet route. AWS services are reached through VPC endpoints:
 S3 (gateway) and ecr.api, ecr.dkr, logs, secretsmanager (interface).
-
 
 | Tier | Implementation |
 | :--- | :--- |
@@ -27,18 +30,20 @@ S3 (gateway) and ecr.api, ecr.dkr, logs, secretsmanager (interface).
 
 ## Repository layout
 
-main.tf / variables.tf / outputs.tf / provider.tf / versions.tf root module
-modules/vpc network, endpoints, security groups
-modules/ecr image registry
-modules/rds database + Secrets Manager
-modules/alb load balancer, target group, listener
-modules/ecs cluster, IAM, task definition, service, autoscaling
-modules/github_oidc IAM role GitHub Actions assumes (OIDC, no stored keys)
-modules/cloudwatch SNS topic + alarms (ECS CPU, ALB 5xx/unhealthy, RDS CPU/storage)
-bootstrap/ one-time: creates the S3 bucket used as the remote state backend
-app/ Node.js (Express 5 + pg) API, multi-stage Dockerfile
-.github/workflows/ deploy.yml (app CI/CD), terraform-ci.yml (fmt + validate + PR plan)
-
+```text
+main.tf / variables.tf / outputs.tf / provider.tf / versions.tf   root module
+modules/vpc            network, endpoints, security groups
+modules/ecr            image registry
+modules/rds            database + Secrets Manager
+modules/alb            load balancer, target group, listener
+modules/ecs            cluster, IAM, task definition, service, autoscaling
+modules/github_oidc    IAM roles GitHub Actions assumes (OIDC, no stored keys)
+modules/cloudwatch     SNS topic + alarms (ECS CPU, ALB 5xx/unhealthy, RDS CPU/storage)
+bootstrap/             one-time: creates the S3 bucket used as the remote state backend
+app/                   Node.js (Express 5 + pg) API, multi-stage Dockerfile
+.github/workflows/     deploy.yml (app CI/CD), terraform-ci.yml (fmt + validate + PR plan)
+docs/proof/            deployment screenshots and captions
+```
 
 ## Key design decisions
 
@@ -47,7 +52,26 @@ app/ Node.js (Express 5 + pg) API, multi-stage Dockerfile
 - **No NAT gateway:** tasks reach ECR, S3, CloudWatch Logs and Secrets Manager via VPC endpoints, so private subnets have no internet path. For a small setup the interface endpoints cost about as much as a NAT gateway; the reason for choosing them is isolation.
 - **Terraform vs pipeline ownership:** Terraform owns infrastructure; the pipeline owns which image runs. The service ignores `task_definition` and `desired_count` changes so `terraform apply` never undoes a deploy or autoscaling.
 - **Shallow health check:** the ALB checks `/`, which does not touch the database, so a DB outage cannot cause every task to be marked unhealthy and restarted. The `alb-unhealthy-hosts` and `alb-5xx` CloudWatch alarms are the backstop that shallow check can't provide.
-- **Two OIDC roles, not one:** the deploy role (assumed on pushes to `main`) can only push to one ECR repo and update one ECS service. A separate, read-only role (assumed only on `pull_request` runs) lets PR workflows run `terraform plan` without ever being able to change anything — different trust condition, different permissions, on purpose.
+- **Two OIDC roles, not one:** the deploy role (assumed on pushes to `main`) can only push to one ECR repo and update one ECS service. A separate plan role (assumed only on `pull_request` runs) can run `terraform plan` but cannot change infrastructure. It has `ReadOnlyAccess` plus two narrow additions found while testing: write access to the single state lock object (native S3 locking writes a `.tflock` key) and read access to the DB secret (plan refreshes every resource). Different trust condition, different permissions, on purpose.
+
+## Deployment proof
+
+The stack was deployed from scratch on 17 October 2026 (us-east-1), verified, and destroyed the same day (53 resources). Account IDs are redacted. Every screenshot, with captions, is listed in [`docs/proof/captions.md`](docs/proof/captions.md).
+
+**The API through the load balancer, with the database connected:**
+
+![API online](docs/proof/06-api-online.png)
+![Tracking endpoint with database_connected true](docs/proof/07-track-database-connected.png)
+
+**CI/CD: both workflows green, ECS running the commit-SHA image built by the pipeline:**
+
+![Green GitHub Actions runs](docs/proof/11b-github-actions-green-runs.png)
+
+**Security: private encrypted database, no NAT gateway, chained security groups:**
+
+![Security group chain](docs/proof/19-security-group-chain.png)
+
+The PR plan check failed three times before it passed (lock file permission, missing variable, secret read). The failures and fixes are documented under [Troubleshooting](#troubleshooting).
 
 ## Deploy
 
@@ -78,6 +102,20 @@ docker push <ecr_repository_url>:latest
 terraform apply
 ```
 
+**Windows PowerShell notes**
+
+```powershell
+Copy-Item terraform.tfvars.example terraform.tfvars
+terraform apply -target="module.ecr"          # quote the target, or PowerShell splits it at the dot
+
+$repo = terraform output -raw ecr_repository_url
+$registry = $repo.Split('/')[0]
+# piping the token can fail with 400 Bad Request in PowerShell; use cmd for the login:
+cmd /c "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $registry"
+docker build -t "${repo}:latest" ./app
+docker push "${repo}:latest"
+```
+
 Then in the GitHub repo, add these **repository variables** (Settings → Secrets and variables → Actions → Variables) from the Terraform outputs: `AWS_REGION`, `ECR_REPOSITORY` (name only, e.g. `shopfast-repo`), `ECS_CLUSTER`, `ECS_SERVICE`, `TASK_FAMILY`, `AWS_ROLE_ARN`, and `TF_PLAN_ROLE_ARN` (for the PR plan workflow). Pushing a change under `app/` to `main` now deploys automatically. Opening a PR that touches `**.tf` now runs `terraform plan` as a check.
 
 Recommended: turn on branch protection for `main` requiring the `plan` check plus one review approval — that review is the manual-approval gate before anyone runs `terraform apply` locally.
@@ -86,13 +124,30 @@ Optionally set `alert_email` in `terraform.tfvars` to get emailed when a CloudWa
 
 Verify: open `final_app_url` (returns `{"service":"ShopFast API","status":"Online"}`), then `/track/123` (proves the app reaches the database). Remove everything with `terraform destroy` when done (ALB, RDS and endpoints are billed hourly). The state bucket in `bootstrap/` is separate and won't be destroyed by this — tear it down manually if you're done for good.
 
+**After a destroy:** the roles and cluster no longer exist, so the deploy workflow and the PR plan check will fail by design until you deploy again. Disable the workflows in the Actions tab (or redeploy) to keep the repo's checks green.
+
+## Troubleshooting
+
+- **PR plan fails with AccessDenied on the state lock:** native S3 locking writes `shopfast/terraform.tfstate.tflock`, even during a plan. The plan role needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on that key only.
+- **PR plan asks for a value for `github_repo`:** `terraform.tfvars` is gitignored, so CI has no value. Pass `TF_VAR_github_repo: ${{ github.repository }}` in the plan step.
+- **PR plan fails reading the DB secret:** `ReadOnlyAccess` does not include `secretsmanager:GetSecretValue`, but plan refreshes every resource. Allow it on `shopfast-db-credentials-*` only.
+- **Tasks keep restarting:** check the ECS service events and stopped-task reason, then the CloudWatch log group `/ecs/shopfast-api`.
+- **Image pull timeout:** a VPC endpoint is missing (`ecr.api`, `ecr.dkr` or the S3 gateway), or the endpoint security group does not allow 443 from the VPC.
+- **`/` returns 200 but `/track/123` returns 500:** the app cannot reach the database. Check that the RDS security group allows 5432 from the Fargate security group, then the logs for "Database query failed". The shallow health check hides this by design.
+- **`terraform apply -target=module.ecr` fails on PowerShell:** quote the argument: `terraform apply -target="module.ecr"`.
+- **ECR login returns 400 Bad Request on PowerShell:** run the login through `cmd /c` as shown above.
+- **OIDC provider already exists:** set `create_github_oidc_provider = false`.
+
 ## Known limitations (deliberate scope for a lab)
 
 - HTTP only (no domain/ACM certificate, so no HTTPS listener yet).
 - RDS is single-AZ by default (`multi_az` variable available); `skip_final_snapshot` and 7-day log retention are lab settings.
 - DB connection is encrypted but the RDS certificate is not verified (needs the RDS CA bundle in the image).
 - No WAF yet.
-- CloudWatch alarms cover CPU, 5xx, unhealthy hosts and DB storage, but there's no dashboard yet.
+- CloudWatch alarms cover CPU, 5xx, unhealthy hosts and DB storage, but there's no dashboard yet. Without `alert_email` the alarms have no subscribers.
 - `terraform apply` still runs locally after a PR is reviewed and merged; there's no automated apply step (CI only plans, on purpose — apply from CI would need a much more privileged OIDC role).
+- The plan role can read the DB secret (needed for plan's refresh). That is acceptable for a personal repo; on a team, restrict who can run workflows or plan with `-refresh=false`.
+- ECR image tags are mutable (the pipeline also pushes `latest`); immutable tags with commit-SHA only would be stricter.
+- No automatic secret rotation (RDS-managed master credentials with rotation is the production alternative).
 - Modules are environment-agnostic (names, sizes and CIDRs are variables); separate per-environment `tfvars` and state are a next step.
 - `/track/:orderId` returns hard-coded sample data after a real `SELECT NOW()` connectivity check.
