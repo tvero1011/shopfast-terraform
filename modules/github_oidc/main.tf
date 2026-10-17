@@ -164,3 +164,19 @@ resource "aws_iam_role_policy" "terraform_plan_state_lock" {
     }]
   })
 }
+
+# `terraform plan` refreshes the stored DB password, which ReadOnlyAccess
+# does not allow. Grant read on this project's DB secret only.
+resource "aws_iam_role_policy" "terraform_plan_read_db_secret" {
+  name = "${var.project_name}-plan-read-db-secret"
+  role = aws_iam_role.terraform_plan.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = "arn:aws:secretsmanager:*:*:secret:${var.project_name}-db-credentials-*"
+    }]
+  })
+}
