@@ -1,8 +1,6 @@
 # ---------------------------------------------------------
 # 1. Identity
 # ---------------------------------------------------------
-# PR plan check test
-
 variable "project_name" {
   description = "Prefix used for naming all AWS resources"
   type        = string
