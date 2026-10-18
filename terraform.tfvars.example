@@ -1,8 +1,11 @@
 # Copy to terraform.tfvars (git-ignored) and edit.
-github_repo = "YOUR-GITHUB-USERNAME/YOUR-REPO-NAME"
+# github_repo = "tvero1011/shopfast-terraform"
 
 # Local only: your AWS CLI profile. Omit in CI.
 # aws_profile = "tf-dev"
 
 # Set to false if this AWS account already has the GitHub OIDC provider.
 # create_github_oidc_provider = true
+
+# Optional: receive CloudWatch alarm notifications by email
+# alert_email = "your-email@example.com"
