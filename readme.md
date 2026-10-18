@@ -73,41 +73,136 @@ The stack was deployed from scratch on 17 October 2026 (us-east-1), verified, an
 
 The PR plan check failed three times before it passed (lock file permission, missing variable, secret read). The failures and fixes are documented under [Troubleshooting](#troubleshooting).
 
-## Deploy
+## Deploy (step by step)
 
-Prerequisites: Terraform >= 1.10, AWS CLI with credentials, Docker.
+This guide assumes you have never deployed this project before. Follow the steps in order and do not skip the checks. Each step says **where to run** the command, **what you should see**, and **what to do if you don't**.
+
+> **Cost warning:** the load balancer, the database and the VPC endpoints are billed **every hour they exist**. Deploy, test, then destroy (Step 12) in the same sitting. Check the AWS Billing page the next day.
+
+> **Where to run commands:** unless a step says otherwise, run commands from the **project root** (the folder that contains `main.tf`). Running Terraform from the wrong folder is the most common mistake. If a command says "No configuration files" you are in the wrong folder.
+
+### Step 0. What you need installed
+
+You need four tools. Check each one:
 
 ```bash
-# 0. One-time: create the remote state bucket
+terraform version     # must be 1.10 or newer
+aws --version         # AWS CLI
+docker version        # must show both a Client and a Server section
+git --version
+```
+
+If `docker version` shows an error under **Server**, start Docker Desktop and wait until it says it is running, then try again.
+
+### Step 1. Get the code and open the project root
+
+```bash
+git clone https://github.com/<your-username>/<your-repo>.git
+cd <your-repo>
+```
+
+You are in the project root when `dir` (PowerShell) or `ls` (Bash) shows `main.tf`, `modules`, `bootstrap` and `app`.
+
+### Step 2. Log in to AWS and check who you are
+
+Log in the way you normally do. If you use SSO (Identity Center):
+
+```bash
+aws sso login --profile YOUR_PROFILE
+aws sts get-caller-identity --profile YOUR_PROFILE
+```
+
+**You should see:** a block with `UserId`, `Account` and `Arn`. That means you are logged in. Do not paste or screenshot this output anywhere public: it contains your account ID.
+
+**If it fails:** the session expired or the profile name is wrong. Run the login command again.
+
+### Step 3. Create the state bucket (first time only)
+
+Terraform keeps a record of what it built (the **state**). This project stores it in an S3 bucket that lives outside the main project, so it survives `terraform destroy`.
+
+**If you deployed before:** the bucket probably still exists. Check with:
+
+```bash
+aws s3 ls --profile YOUR_PROFILE
+```
+
+If you see your `shopfast-tfstate-...` bucket in the list, **skip to Step 4**.
+
+**If this is your very first deploy:**
+
+```bash
 cd bootstrap
 terraform init
 terraform apply -var="state_bucket_name=shopfast-tfstate-<something-unique>"
-# copy the printed bucket name into the backend block in ../versions.tf
-cd ..
-
-cp terraform.tfvars.example terraform.tfvars     # set github_repo (and aws_profile locally)
-terraform fmt -recursive
-terraform init                                    # uses the S3 backend now
-terraform validate
-
-# 1. Create the registry first (the service needs an image to start)
-terraform apply -target=module.ecr
-
-# 2. Build and push the first image
-#    (login: aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <registry-host>)
-docker build -t <ecr_repository_url>:latest ./app
-docker push <ecr_repository_url>:latest
-
-# 3. Everything else
-terraform apply
 ```
 
-**Windows PowerShell notes**
+Bucket names are unique across all of AWS, so make yours unique (for example add your initials and a number). Type `yes` when asked. When it finishes it prints the bucket name. Copy it into the `backend` block in `versions.tf` in the project root. Then go back:
+
+```bash
+cd ..
+```
+
+### Step 4. Create your settings file
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+```
+
+On PowerShell use `Copy-Item terraform.tfvars.example terraform.tfvars`.
+
+Open `terraform.tfvars` in your editor and set:
+- `github_repo`: your repo in the form `username/repo-name`
+- `aws_profile`: your AWS profile name (for local runs)
+
+This file is ignored by git on purpose. Never commit it.
+
+### Step 5. Prepare Terraform
+
+```bash
+terraform fmt -recursive
+terraform init
+terraform validate
+```
+
+**You should see:** `Terraform has been successfully initialized!` after `init`, and `Success! The configuration is valid.` after `validate`.
+
+**If `init` fails:** the bucket name in `versions.tf` is wrong, or the bucket does not exist, or you are not logged in (go back to Step 2).
+
+### Step 6. Create the image registry first
+
+The app needs a container image before the service can start, so create just the registry (ECR) first.
+
+Bash:
+
+```bash
+terraform apply -target=module.ecr
+```
+
+PowerShell (the quotes are required, or PowerShell splits the text at the dot):
 
 ```powershell
-Copy-Item terraform.tfvars.example terraform.tfvars
-terraform apply -target="module.ecr"          # quote the target, or PowerShell splits it at the dot
+terraform apply -target="module.ecr"
+```
 
+Read the plan, type `yes`. **You should see:** `Apply complete!` with a small number of resources added.
+
+### Step 7. Build and push the first image
+
+Make sure Docker Desktop is running.
+
+**Bash:**
+
+```bash
+REPO=$(terraform output -raw ecr_repository_url)
+REGISTRY=${REPO%%/*}
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $REGISTRY
+docker build -t "$REPO:latest" ./app
+docker push "$REPO:latest"
+```
+
+**PowerShell:**
+
+```powershell
 $repo = terraform output -raw ecr_repository_url
 $registry = $repo.Split('/')[0]
 # piping the token can fail with 400 Bad Request in PowerShell; use cmd for the login:
@@ -116,15 +211,86 @@ docker build -t "${repo}:latest" ./app
 docker push "${repo}:latest"
 ```
 
-Then in the GitHub repo, add these **repository variables** (Settings → Secrets and variables → Actions → Variables) from the Terraform outputs: `AWS_REGION`, `ECR_REPOSITORY` (name only, e.g. `shopfast-repo`), `ECS_CLUSTER`, `ECS_SERVICE`, `TASK_FAMILY`, `AWS_ROLE_ARN`, and `TF_PLAN_ROLE_ARN` (for the PR plan workflow). Pushing a change under `app/` to `main` now deploys automatically. Opening a PR that touches `**.tf` now runs `terraform plan` as a check.
+**You should see:** `Login Succeeded`, then the build finishing, then layers being pushed.
 
-Recommended: turn on branch protection for `main` requiring the `plan` check plus one review approval — that review is the manual-approval gate before anyone runs `terraform apply` locally.
+**If login returns 400 Bad Request on PowerShell:** use the `cmd /c` line exactly as shown.
 
-Optionally set `alert_email` in `terraform.tfvars` to get emailed when a CloudWatch alarm fires; leave it unset to just create the SNS topic without a subscription.
+### Step 8. Build everything else
 
-Verify: open `final_app_url` (returns `{"service":"ShopFast API","status":"Online"}`), then `/track/123` (proves the app reaches the database). Remove everything with `terraform destroy` when done (ALB, RDS and endpoints are billed hourly). The state bucket in `bootstrap/` is separate and won't be destroyed by this — tear it down manually if you're done for good.
+```bash
+terraform apply
+```
+
+Terraform lists everything it will create. Read the summary line (`Plan: N to add, 0 to change, 0 to destroy`), type `yes`, and wait. The load balancer and the database take several minutes, so be patient and do not press Ctrl+C.
+
+**You should see:** `Apply complete!` and a list of outputs, including `final_app_url`.
+
+**If it fails partway:** do not run `terraform destroy` in a panic. Read the error text, find it under [Troubleshooting](#troubleshooting), fix it, and run `terraform apply` again. Terraform continues from where it stopped.
+
+### Step 9. Add the GitHub repository variables
+
+This lets the pipeline deploy to your new stack. In your GitHub repo go to **Settings → Secrets and variables → Actions → Variables** and add these **repository variables**, using the values from `terraform output`:
+
+- `AWS_REGION`
+- `ECR_REPOSITORY` (the name only, for example `shopfast-repo`, not the full URL)
+- `ECS_CLUSTER`
+- `ECS_SERVICE`
+- `TASK_FAMILY`
+- `AWS_ROLE_ARN`
+- `TF_PLAN_ROLE_ARN` (for the PR plan workflow)
+
+Role ARNs change when the roles are recreated, so after a redeploy always update `AWS_ROLE_ARN` and `TF_PLAN_ROLE_ARN`.
+
+From now on, pushing a change under `app/` to `main` deploys automatically, and opening a PR that touches `**.tf` runs `terraform plan` as a check.
+
+Recommended: turn on branch protection for `main` requiring the `plan` check plus one review approval. That review is the manual-approval gate before anyone runs `terraform apply` locally.
+
+Optionally set `alert_email` in `terraform.tfvars` to get emailed when a CloudWatch alarm fires. Leave it unset to just create the SNS topic without a subscription.
+
+### Step 10. Check that it works
+
+```bash
+terraform output final_app_url
+```
+
+Open that address in a browser.
+
+1. **`/`** should return `{"service":"ShopFast API","status":"Online"}`. This proves the load balancer and the app work.
+2. **`/track/123`** should return data with the database connected. This proves the app can reach the database.
+
+If `/` works but `/track/123` fails with a 500 error, see Troubleshooting ("`/` returns 200 but `/track/123` returns 500").
+
+Take your screenshots now, before you destroy anything. Crop out account IDs and hide ARNs.
+
+### Step 11. Optional: prove the pipeline
+
+Push a small change under `app/` to `main` and watch the **Actions** tab. A green run means the pipeline built an image, pushed it with the commit-SHA tag, rolled out a new task definition and waited for ECS to be stable.
+
+### Step 12. Destroy everything (do not forget)
+
+```bash
+terraform destroy
+```
+
+Check the plan lists the resources being removed, type `yes`, and wait for `Destroy complete!`.
+
+Then check the AWS console (region us-east-1) for leftovers: load balancers, RDS databases, VPC endpoints, ECS clusters, and CloudWatch log groups. The next day, check Billing and Cost Explorer.
+
+The state bucket from `bootstrap/` is separate and is **not** destroyed by this command. That is intended. Tear it down manually only if you are done with the project for good.
 
 **After a destroy:** the roles and cluster no longer exist, so the deploy workflow and the PR plan check will fail by design until you deploy again. Disable the workflows in the Actions tab (or redeploy) to keep the repo's checks green.
+
+### Quick redeploy (when you have done it before)
+
+1. Login: `aws sso login --profile YOUR_PROFILE`, then check with `aws sts get-caller-identity`.
+2. Start Docker Desktop.
+3. Confirm the state bucket still exists (`aws s3 ls`).
+4. `terraform init`, `terraform apply -target="module.ecr"`.
+5. Login to ECR, `docker build`, `docker push` (Step 7).
+6. `terraform apply`.
+7. Update the GitHub variables, especially the two role ARNs.
+8. Test `/` and `/track/123`.
+9. `terraform destroy`.
 
 ## Troubleshooting
 
@@ -137,6 +303,9 @@ Verify: open `final_app_url` (returns `{"service":"ShopFast API","status":"Onlin
 - **`terraform apply -target=module.ecr` fails on PowerShell:** quote the argument: `terraform apply -target="module.ecr"`.
 - **ECR login returns 400 Bad Request on PowerShell:** run the login through `cmd /c` as shown above.
 - **OIDC provider already exists:** set `create_github_oidc_provider = false`.
+- **`terraform init` cannot find the state bucket:** the name in `versions.tf` does not match the bucket, or the bucket was deleted. Run `aws s3 ls` to check.
+- **"No configuration files" error:** you are in the wrong folder. `cd` to the project root (the folder with `main.tf`).
+- **Session expired mid-way:** run your login command again (Step 2), then repeat the same Terraform command.
 
 ## Known limitations (deliberate scope for a lab)
 
