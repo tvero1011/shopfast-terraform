@@ -26,10 +26,14 @@ Deployed from scratch on 17 October 2026 in us-east-1, verified, and destroyed t
 | 18 | `18-no-nat-gateway.png` | NAT gateways page: none found, private subnets reach AWS services through endpoints only |
 | 19 | `19-security-group-chain.png` | Security group chain: internet to ALB (80), ALB SG to Fargate SG (3000), Fargate SG to RDS SG (5432); endpoints accept 443 from the VPC only |
 | 20 | `20-terraform-destroy-complete.png` | `terraform destroy` finished: 53 resources destroyed, nothing left running (only the state bucket remains) |
+| 21 | `21-deploy-green-after-hardening.png` | Deploy pipeline re-tested after the security hardening: every step green in 5m 27s (OIDC login, ECR login, commit-SHA image build and push, task definition update, ECS deploy waited until stable) |
+| 22 | `22-pr-validate-only-green.png` | The validate-only PR check passes in 17s: `fmt`, `init` with no backend and `validate`, with no AWS credentials involved |
 
 **About the resource counts.** The first full `terraform apply` added 49 resources. With the ECR repository (created first with `-target`) and two inline policies added to the plan role while fixing the PR check, the stack held 53 resources when it was destroyed. The plan role was removed afterwards, so a fresh deploy creates fewer resources than this.
 
 **About rows 12-15 (historical).** Earlier I ran `terraform plan` on pull requests with a read-only AWS role. It failed three times before it passed: the role could not write the S3 lock file, `github_repo` had no value in CI because `terraform.tfvars` is gitignored, and plan could not read the DB secret because `ReadOnlyAccess` excludes it. Each was fixed with a scoped change. After a security review I removed the plan role and the plan job: read-only access can still read Terraform state, which holds the DB password. Pull-request checks now run `fmt`, `init -backend=false` and `validate` with no AWS credentials. These screenshots are kept as debugging history.
+
+**About rows 21-22.** These confirm the pipelines still work after the hardening: the deploy workflow still ships a commit-SHA image to ECS through OIDC, and the PR check now needs no AWS credentials at all.
 
 ## Key screenshots
 
