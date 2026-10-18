@@ -34,11 +34,6 @@ output "github_actions_role_arn" {
   value       = module.github_oidc.role_arn
 }
 
-output "terraform_plan_role_arn" {
-  description = "Read-only IAM role for PR plan workflows (GitHub variable TF_PLAN_ROLE_ARN)"
-  value       = module.github_oidc.terraform_plan_role_arn
-}
-
 # ---------------------------------------------------------
 # 3. Backend and database
 # ---------------------------------------------------------
