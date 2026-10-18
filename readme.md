@@ -41,7 +41,7 @@ modules/github_oidc    IAM roles GitHub Actions assumes (OIDC, no stored keys)
 modules/cloudwatch     SNS topic + alarms (ECS CPU, ALB 5xx/unhealthy, RDS CPU/storage)
 bootstrap/             one-time: creates the S3 bucket used as the remote state backend
 app/                   Node.js (Express 5 + pg) API, multi-stage Dockerfile
-.github/workflows/     deploy.yml (app CI/CD), terraform-ci.yml (fmt + validate + PR plan)
+.github/workflows/     deploy.yml (app CI/CD), terraform-ci.yml (fmt + init + validate, no AWS credentials)
 docs/proof/            deployment screenshots and captions
 ```
 
@@ -52,7 +52,7 @@ docs/proof/            deployment screenshots and captions
 - **No NAT gateway:** tasks reach ECR, S3, CloudWatch Logs and Secrets Manager via VPC endpoints, so private subnets have no internet path. For a small setup the interface endpoints cost about as much as a NAT gateway; the reason for choosing them is isolation.
 - **Terraform vs pipeline ownership:** Terraform owns infrastructure; the pipeline owns which image runs. The service ignores `task_definition` and `desired_count` changes so `terraform apply` never undoes a deploy or autoscaling.
 - **Shallow health check:** the ALB checks `/`, which does not touch the database, so a DB outage cannot cause every task to be marked unhealthy and restarted. The `alb-unhealthy-hosts` and `alb-5xx` CloudWatch alarms are the backstop that shallow check can't provide.
-- **Two OIDC roles, not one:** the deploy role (assumed on pushes to `main`) can only push to one ECR repo and update one ECS service. A separate plan role (assumed only on `pull_request` runs) can run `terraform plan` but cannot change infrastructure. It has `ReadOnlyAccess` plus two narrow additions found while testing: write access to the single state lock object (native S3 locking writes a `.tflock` key) and read access to the DB secret (plan refreshes every resource). Different trust condition, different permissions, on purpose.
+- **One OIDC role, and no AWS access on pull requests:** the deploy role can only be assumed by pushes to `main`, and can only push to one ECR repo and update one ECS service. Pull-request checks (`terraform fmt`, `init -backend=false`, `validate`) run with `contents: read` and no AWS credentials at all. See [Security review](#security-review-and-decisions) for why the PR plan role was removed.
 
 ## Deployment proof
 
@@ -71,7 +71,7 @@ The stack was deployed from scratch on 17 October 2026 (us-east-1), verified, an
 
 ![Security group chain](docs/proof/19-security-group-chain.png)
 
-The PR plan check failed three times before it passed (lock file permission, missing variable, secret read). The failures and fixes are documented under [Troubleshooting](#troubleshooting).
+An earlier version also ran `terraform plan` on pull requests with a read-only AWS role. After a security review I removed it (see [Security review](#security-review-and-decisions)); pull-request checks now run without any AWS access.
 
 ## Deploy (step by step)
 
@@ -237,13 +237,12 @@ This lets the pipeline deploy to your new stack. In your GitHub repo go to **Set
 - `ECS_SERVICE`
 - `TASK_FAMILY`
 - `AWS_ROLE_ARN`
-- `TF_PLAN_ROLE_ARN` (for the PR plan workflow)
 
-Role ARNs change when the roles are recreated, so after a redeploy always update `AWS_ROLE_ARN` and `TF_PLAN_ROLE_ARN`.
+The role ARN changes when the role is recreated, so after a redeploy always update `AWS_ROLE_ARN`.
 
-From now on, pushing a change under `app/` to `main` deploys automatically, and opening a PR that touches `**.tf` runs `terraform plan` as a check.
+From now on, pushing a change under `app/` to `main` deploys automatically, and opening a PR that touches `**.tf` runs format, init and validate checks (no AWS credentials).
 
-Recommended: turn on branch protection for `main` requiring the `plan` check plus one review approval. That review is the manual-approval gate before anyone runs `terraform apply` locally.
+Recommended: turn on branch protection for `main` requiring the `validate` check plus one review approval. Run `terraform plan` locally before every `terraform apply`; that local plan plus the review is the approval gate.
 
 Optionally set `alert_email` in `terraform.tfvars` to get emailed when a CloudWatch alarm fires. Leave it unset to just create the SNS topic without a subscription.
 
@@ -278,7 +277,7 @@ Then check the AWS console (region us-east-1) for leftovers: load balancers, RDS
 
 The state bucket from `bootstrap/` is separate and is **not** destroyed by this command. That is intended. Tear it down manually only if you are done with the project for good.
 
-**After a destroy:** the roles and cluster no longer exist, so the deploy workflow and the PR plan check will fail by design until you deploy again. Disable the workflows in the Actions tab (or redeploy) to keep the repo's checks green.
+**After a destroy:** the roles and cluster no longer exist, so the deploy workflow will fail by design until you deploy again. Disable it in the Actions tab (or redeploy) to keep the repo's checks green. The Terraform checks keep working because they use no AWS credentials.
 
 ### Quick redeploy (when you have done it before)
 
@@ -288,15 +287,13 @@ The state bucket from `bootstrap/` is separate and is **not** destroyed by this 
 4. `terraform init`, `terraform apply -target="module.ecr"`.
 5. Login to ECR, `docker build`, `docker push` (Step 7).
 6. `terraform apply`.
-7. Update the GitHub variables, especially the two role ARNs.
+7. Update the GitHub variables, especially the role ARN.
 8. Test `/` and `/track/123`.
 9. `terraform destroy`.
 
 ## Troubleshooting
 
-- **PR plan fails with AccessDenied on the state lock:** native S3 locking writes `shopfast/terraform.tfstate.tflock`, even during a plan. The plan role needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on that key only.
-- **PR plan asks for a value for `github_repo`:** `terraform.tfvars` is gitignored, so CI has no value. Pass `TF_VAR_github_repo: ${{ github.repository }}` in the plan step.
-- **PR plan fails reading the DB secret:** `ReadOnlyAccess` does not include `secretsmanager:GetSecretValue`, but plan refreshes every resource. Allow it on `shopfast-db-credentials-*` only.
+- **Terraform checks fail on `fmt -check`:** run `terraform fmt -recursive` locally and commit the result.
 - **Tasks keep restarting:** check the ECS service events and stopped-task reason, then the CloudWatch log group `/ecs/shopfast-api`.
 - **Image pull timeout:** a VPC endpoint is missing (`ecr.api`, `ecr.dkr` or the S3 gateway), or the endpoint security group does not allow 443 from the VPC.
 - **`/` returns 200 but `/track/123` returns 500:** the app cannot reach the database. Check that the RDS security group allows 5432 from the Fargate security group, then the logs for "Database query failed". The shallow health check hides this by design.
@@ -307,6 +304,15 @@ The state bucket from `bootstrap/` is separate and is **not** destroyed by this 
 - **"No configuration files" error:** you are in the wrong folder. `cd` to the project root (the folder with `main.tf`).
 - **Session expired mid-way:** run your login command again (Step 2), then repeat the same Terraform command.
 
+## Security review and decisions
+
+I reviewed this project for security issues, decided what to fix now, and wrote down the rest.
+
+- **Fixed: no AWS access on pull requests.** An earlier version ran `terraform plan` on pull requests with a read-only AWS role. Read-only access can still read the Terraform state file, which holds the DB password, so any pull-request run that could assume the role could reach it. I removed the role. Pull-request checks now run only `fmt`, `init -backend=false` and `validate`, with `contents: read` and no credentials. I run `terraform plan` locally before every apply.
+- **Accepted for the lab, documented: password in state.** Terraform generates the DB password, so it ends up in state. State is remote, encrypted and locked. The production fix is RDS-managed credentials, so the password never enters state.
+- **Accepted for the lab, documented: HTTP only.** An ACM certificate needs a domain I own. For production: ACM certificate, HTTPS listener on 443, redirect 80 to 443.
+- **Already in place:** least-privilege deploy role limited to one ECR repo and one ECS service, trusted only for pushes to `main`; no long-lived AWS keys (OIDC); private encrypted database; security groups chained so only the app reaches the database.
+
 ## Known limitations (deliberate scope for a lab)
 
 - HTTP only (no domain/ACM certificate, so no HTTPS listener yet).
@@ -314,8 +320,8 @@ The state bucket from `bootstrap/` is separate and is **not** destroyed by this 
 - DB connection is encrypted but the RDS certificate is not verified (needs the RDS CA bundle in the image).
 - No WAF yet.
 - CloudWatch alarms cover CPU, 5xx, unhealthy hosts and DB storage, but there's no dashboard yet. Without `alert_email` the alarms have no subscribers.
-- `terraform apply` still runs locally after a PR is reviewed and merged; there's no automated apply step (CI only plans, on purpose — apply from CI would need a much more privileged OIDC role).
-- The plan role can read the DB secret (needed for plan's refresh). That is acceptable for a personal repo; on a team, restrict who can run workflows or plan with `-refresh=false`.
+- `terraform apply` and `terraform plan` run locally; there is no automated plan or apply in CI (on purpose: either would need AWS access from pull requests, or a much more privileged OIDC role).
+- The DB password is stored in Terraform state. State is remote, encrypted and locked, but anyone who can read the state bucket can read the password. The production alternative is RDS-managed master credentials, so the password never enters state.
 - ECR image tags are mutable (the pipeline also pushes `latest`); immutable tags with commit-SHA only would be stricter.
 - No automatic secret rotation (RDS-managed master credentials with rotation is the production alternative).
 - Modules are environment-agnostic (names, sizes and CIDRs are variables); separate per-environment `tfvars` and state are a next step.
