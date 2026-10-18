@@ -2,7 +2,7 @@
 
 Infrastructure as Code for a containerized Node.js API on AWS. A public Application Load Balancer fronts ECS Fargate tasks running in private subnets, which talk to a private RDS PostgreSQL database. A GitHub Actions pipeline builds, pushes and deploys new versions using short-lived OIDC credentials.
 
-> **Status:** DevOps portfolio and learning project. Deployed, tested and destroyed on AWS (us-east-1) on 17 October 2026; see [Deployment proof](#deployment-proof) and [Known limitations](#known-limitations-deliberate-scope-for-a-lab) before any production use.
+> **Status:** DevOps portfolio and learning project. Deployed, tested and destroyed on AWS (us-east-1) on 17 and 18 October 2026; see [Deployment proof](#deployment-proof) and [Known limitations](#known-limitations-deliberate-scope-for-a-lab) before any production use.
 
 ## Architecture
 
@@ -43,6 +43,7 @@ bootstrap/             one-time: creates the S3 bucket used as the remote state 
 app/                   Node.js (Express 5 + pg) API, multi-stage Dockerfile
 .github/workflows/     deploy.yml (app CI/CD), terraform-ci.yml (fmt + init + validate, no AWS credentials)
 docs/proof/            deployment screenshots and captions
+docs/scripts/          check-leftovers.ps1 (post-destroy check for billable leftovers)
 ```
 
 ## Key design decisions
@@ -56,7 +57,12 @@ docs/proof/            deployment screenshots and captions
 
 ## Deployment proof
 
-The stack was deployed from scratch on 17 October 2026 (us-east-1), verified, and destroyed the same day (53 resources). Account IDs are redacted. Every screenshot, with captions, is listed in [`docs/proof/captions.md`](docs/proof/captions.md).
+The stack was deployed and tested on AWS (us-east-1) twice, and destroyed after each run:
+
+- **17 October 2026:** the first version (53 resources, including a pull-request plan role that I later removed). The screenshots below come from this run.
+- **18 October 2026:** the hardened version (49 resources) after the security review. It was verified with a green deploy run and a validate-only pull-request check, then destroyed and checked for leftovers (every count 0).
+
+Account IDs are redacted. Every screenshot, with captions, is listed in [`docs/proof/captions.md`](docs/proof/captions.md).
 
 **The API through the load balancer, with the database connected:**
 
@@ -71,7 +77,7 @@ The stack was deployed from scratch on 17 October 2026 (us-east-1), verified, an
 
 ![Security group chain](docs/proof/19-security-group-chain.png)
 
-An earlier version also ran `terraform plan` on pull requests with a read-only AWS role. After a security review I removed it (see [Security review](#security-review-and-decisions)); pull-request checks now run without any AWS access.
+The first version also ran `terraform plan` on pull requests with a read-only AWS role. After a security review I removed it (see [Security review](#security-review-and-decisions)); pull-request checks now run without any AWS access.
 
 ## Deploy (step by step)
 
@@ -273,9 +279,18 @@ terraform destroy
 
 Check the plan lists the resources being removed, type `yes`, and wait for `Destroy complete!`.
 
-Then check the AWS console (region us-east-1) for leftovers: load balancers, RDS databases, VPC endpoints, ECS clusters, and CloudWatch log groups. The next day, check Billing and Cost Explorer.
+Then check for leftovers. In PowerShell, from the project root, run the check script. It prints one count per service, and every line should be `0`:
 
-The state bucket from `bootstrap/` is separate and is **not** destroyed by this command. That is intended. Tear it down manually only if you are done with the project for good.
+```powershell
+cd <your-project-root>
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass   # this window only
+Unblock-File .\docs\scripts\check-leftovers.ps1
+.\docs\scripts\check-leftovers.ps1 -Profile YOUR_PROFILE
+```
+
+Two lines may show `1` and are fine: **secrets** (a deleted secret waits in a recovery window for a few days) and **OIDC providers** (if the account already had a GitHub OIDC provider before this project). The script is PowerShell only; on macOS or Linux, check the AWS console (us-east-1) for load balancers, RDS databases, VPC endpoints, NAT gateways, ECS clusters and log groups instead. The next day, check Billing and Cost Explorer.
+
+The state bucket from `bootstrap/` is separate and is **not** destroyed by this command. That is intended. Tear it down manually only if you are done with the project for good: empty the bucket first (it is versioned, so remove all versions), then run `terraform destroy` inside `bootstrap/`.
 
 **After a destroy:** the roles and cluster no longer exist, so the deploy workflow will fail by design until you deploy again. Disable it in the Actions tab (or redeploy) to keep the repo's checks green. The Terraform checks keep working because they use no AWS credentials.
 
@@ -290,6 +305,7 @@ The state bucket from `bootstrap/` is separate and is **not** destroyed by this 
 7. Update the GitHub variables, especially the role ARN.
 8. Test `/` and `/track/123`.
 9. `terraform destroy`.
+10. Run `docs/scripts/check-leftovers.ps1` and confirm every line is `0`.
 
 ## Troubleshooting
 
@@ -303,6 +319,7 @@ The state bucket from `bootstrap/` is separate and is **not** destroyed by this 
 - **`terraform init` cannot find the state bucket:** the name in `versions.tf` does not match the bucket, or the bucket was deleted. Run `aws s3 ls` to check.
 - **"No configuration files" error:** you are in the wrong folder. `cd` to the project root (the folder with `main.tf`).
 - **Session expired mid-way:** run your login command again (Step 2), then repeat the same Terraform command.
+- **PowerShell says the script "is not digitally signed":** run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` and `Unblock-File` on the script, as shown in Step 12. The setting only lasts for that PowerShell window.
 
 ## Security review and decisions
 
