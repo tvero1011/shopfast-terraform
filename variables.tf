@@ -56,3 +56,5 @@ variable "alert_email" {
   type        = string
   default     = null
 }
+
+# validate-only CI test
