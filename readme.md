@@ -332,15 +332,25 @@ I reviewed this project for security issues, decided what to fix now, and wrote 
 
 ## Known limitations (deliberate scope for a lab)
 
-- HTTP only (no domain/ACM certificate, so no HTTPS listener yet).
-- RDS is single-AZ by default (`multi_az` variable available); `skip_final_snapshot` and 7-day log retention are lab settings.
-- DB connection is encrypted but the RDS certificate is not verified (needs the RDS CA bundle in the image).
-- No WAF yet.
-- CloudWatch alarms cover CPU, 5xx, unhealthy hosts and DB storage, but there's no dashboard yet. Without `alert_email` the alarms have no subscribers.
-- `terraform apply` and `terraform plan` run locally; there is no automated plan or apply in CI (on purpose: either would need AWS access from pull requests, or a much more privileged OIDC role).
-- The DB password is stored in Terraform state. State is remote, encrypted and locked, but anyone who can read the state bucket can read the password. The production alternative is RDS-managed master credentials, so the password never enters state.
-- ECR image tags are mutable (the pipeline also pushes `latest`); immutable tags with commit-SHA only would be stricter.
-- No automatic secret rotation (RDS-managed master credentials with rotation is the production alternative).
-- Modules are environment-agnostic (names, sizes and CIDRs are variables); separate per-environment `tfvars` and state are a next step.
-- `/track/:orderId` returns hard-coded sample data after a real `SELECT NOW()` connectivity check.
-- Both workflows use `runs-on: ubuntu-latest`. GitHub scheduled that label to move to Ubuntu 26.04 between 19 October and 19 November 2026. If a run fails after that, pin `ubuntu-24.04` or fix the step that broke.
+- **Network and edge:** HTTP only (no domain or ACM certificate, so no HTTPS listener), and no WAF.
+- **Database:** RDS is single-AZ by default (`multi_az` variable available), with `skip_final_snapshot` and 7-day log retention as lab settings. The DB connection is encrypted but the RDS certificate is not verified (needs the RDS CA bundle in the image).
+- **Secrets:** the DB password is stored in Terraform state. State is remote, encrypted and locked, but anyone who can read the state bucket can read the password, and there is no automatic rotation. The production alternative is RDS-managed master credentials with rotation, so the password never enters state.
+- **Monitoring:** CloudWatch alarms cover CPU, 5xx, unhealthy hosts and DB storage, but there is no dashboard, and without `alert_email` the alarms have no subscribers.
+- **Delivery:**
+  - `terraform plan` and `apply` run locally, not in CI, on purpose: either would need AWS access from pull requests, or a much more privileged OIDC role.
+  - ECR tags are mutable (the pipeline also pushes `latest`); commit-SHA-only immutable tags would be stricter.
+  - Modules are environment-agnostic, but per-environment `tfvars` and state are a next step.
+  - Both workflows use `runs-on: ubuntu-latest`, which GitHub scheduled to move to Ubuntu 26.04 between 19 October and 19 November 2026. If a run fails, pin `ubuntu-24.04` or fix the step that broke.
+- **App:** `/track/:orderId` returns hard-coded sample data after a real `SELECT NOW()` connectivity check.
+
+## Future improvements
+
+1. **Security and edge:** add a domain with an ACM certificate and an HTTPS listener (redirect 80 to 443), put AWS WAF in front of the ALB, and bundle the RDS CA certificate in the image so the DB connection is fully verified.
+2. **Secrets:** switch to RDS-managed master credentials so the password lives in Secrets Manager with automatic rotation and never enters Terraform state.
+3. **Reliability:** enable `multi_az`, turn off `skip_final_snapshot`, and increase log retention for production.
+4. **Monitoring:** add a CloudWatch dashboard and set `alert_email` so the alarms have subscribers.
+5. **Delivery:**
+   - Use immutable ECR tags with commit SHA only.
+   - Add per-environment `tfvars` and state (dev and prod).
+   - Only after item 2 (no password in state), consider a read-only `terraform plan` on pull requests; keep `apply` manual.
+6. **App:** replace the hard-coded `/track/:orderId` data with a real orders table query.
