@@ -354,3 +354,7 @@ I reviewed this project for security issues, decided what to fix now, and wrote 
    - Add per-environment `tfvars` and state (dev and prod).
    - Only after item 2 (no password in state), consider a read-only `terraform plan` on pull requests; keep `apply` manual.
 6. **App:** replace the hard-coded `/track/:orderId` data with a real orders table query.
+
+## Author
+
+[@tvero1011](https://github.com/tvero1011)
